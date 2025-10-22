@@ -14,7 +14,20 @@ app.listen(port, '0.0.0.0', () => {
 
 // ===== ТЕЛЕГРАМ БОТ =====
 const token = process.env.BOT_TOKEN;
-const bot = new TelegramBot(token, {polling: true});
+const bot = new TelegramBot(token, {
+  polling: {
+    interval: 300,
+    autoStart: true,
+    params: {
+      timeout: 10
+    }
+  }
+});
+
+// Обработчик ошибок polling
+bot.on('polling_error', (error) => {
+  console.log('Polling error, but bot continues:', error.message);
+});
 
 // База знаний
 const knowledgeBase = {
@@ -45,7 +58,7 @@ bot.onText(/\/start/, (msg) => {
   );
 });
 
-// Обработка кнопок
+// Обработка кнопок и сообщений
 bot.on('message', (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text.toLowerCase().trim();
