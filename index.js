@@ -1,22 +1,20 @@
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
+const axios = require('axios');
 
-// ВАЖНО: эта строка исправляет ошибки подключения
 process.env.NTBA_FIX_319 = 1;
 
 const app = express();
 const port = process.env.PORT || 8000;
 
-// Веб-сервер для Koyeb
 app.get('/', (req, res) => {
   res.send('Bot is running!');
 });
 
 app.listen(port, '0.0.0.0', () => {
-  console.log(`Web server is running on port ${port}`);
+  console.log('Server started on port ' + port);
 });
 
-// ===== ТЕЛЕГРАМ БОТ =====
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, {
   polling: {
@@ -25,82 +23,95 @@ const bot = new TelegramBot(token, {
   }
 });
 
-// Обработчик ошибок polling
 bot.on('polling_error', (error) => {
-  console.log('Polling error, but bot continues:', error.message);
+  console.log('Polling error:', error.message);
 });
 
-// База знаний
-const knowledgeBase = {
-  'привет': 'Привет! Я твой умный помощник! 🤖',
-  'как дела': 'Отлично! Работаю над собой! А у тебя?',
-  'что ты умеешь': 'Отвечать на вопросы, показывать время, давать советы!',
-  'совет': 'Начни с малого - каждый день учи что-то новое! 💪',
-  'время': `Сейчас: ${new Date().toLocaleTimeString('ru-RU')}`
-};
+// Функция для запроса к Hugging Face
+async function askHuggingFace(question) {
+  try {
+    console.log('Sending to HF:', question);
+    
+    const response = await axios.post(
+      'https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium',
+      {
+        inputs: question
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
+      }
+    );
+    
+    console.log('HF Response:', response.data);
+    
+    if (response.data && response.data.generated_text) {
+      return response.data.generated_text;
+    } else {
+      return '🤖 ИИ обработал запрос, но не сгенерировал ответ';
+    }
+  } catch (error) {
+    console.log('Hugging Face Error:', error.response?.data || error.message);
+    return '⚠️ ИИ временно недоступен. Попробуйте позже.';
+  }
+}
 
-// Команда /start с кнопками
+// Команда /start
 bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
   const options = {
     reply_markup: {
       keyboard: [
-        ['❓ Что ты умеешь', '🕐 Время'],
-        ['💡 Совет', '📞 Контакты'],
-        ['🎲 Случайный факт']
+        ['❓ Спросить у ИИ', '📞 Контакты'],
+        ['🕐 Время', '🎲 Факт']
       ],
       resize_keyboard: true
     }
   };
   
-  bot.sendMessage(chatId, 
-    'Привет! Я твой улучшенный бот! 🚀\nВыбери кнопку или просто напиши вопрос:', 
+  bot.sendMessage(msg.chat.id, 
+    'Привет! Я бот с ИИ от Hugging Face! 🧠\nНапиши любой вопрос или нажми "Спросить у ИИ"', 
     options
   );
 });
 
-// Обработка кнопок и сообщений
-bot.on('message', (msg) => {
+// Обработка сообщений
+bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
-  const text = msg.text.toLowerCase().trim();
+  const text = msg.text;
 
-  if (text === '/start') return;
-
-  // Обработка кнопок
-  switch(text) {
-    case '❓ что ты умеешь':
-      bot.sendMessage(chatId, 'Я умею:\n• Отвечать на вопросы\n• Показывать время\n• Давать советы\n• И многое другое!');
-      break;
-    case '🕐 время':
-      bot.sendMessage(chatId, `Точное время: ${new Date().toLocaleString('ru-RU')}`);
-      break;
-    case '💡 совет':
-      const advice = [
-        'Никогда не сдавайся!',
-        'Каждая проблема - это возможность',
-        'Учись на ошибках',
-        'Мечтай масштабно!'
-      ];
-      bot.sendMessage(chatId, `Совет: ${advice[Math.floor(Math.random() * advice.length)]}`);
-      break;
-    case '📞 контакты':
-      bot.sendMessage(chatId, 'Связь с создателем: @ch0nyatski\nПо вопросам создания ботов!');
-      break;
-    case '🎲 случайный факт':
-      const facts = [
-        'Коты спят 70% жизни 😴',
-        'Мед никогда не портится 🍯', 
-        'Телеграм создали в 2013 году',
-        'Python назван в честь комедийного шоу 🐍'
-      ];
-      bot.sendMessage(chatId, `Факт: ${facts[Math.floor(Math.random() * facts.length)]}`);
-      break;
-    default:
-      // Поиск в базе знаний
-      const response = knowledgeBase[text] || 
-        `Пока не знаю ответ на "${msg.text}". Но я учусь! Попробуй спросить что-то другое или используй кнопки 👆`;
-      bot.sendMessage(chatId, response);
+  if (text === '❓ Спросить у ИИ') {
+    bot.sendMessage(chatId, 'Напиши свой вопрос и я передам его ИИ!');
+  } 
+  else if (text === '📞 Контакты') {
+    bot.sendMessage(chatId, 'Создатель: @ch0nyatski');
+  }
+  else if (text === '🕐 Время') {
+    bot.sendMessage(chatId, 'Время: ' + new Date().toLocaleString('ru-RU'));
+  }
+  else if (text === '🎲 Факт') {
+    const facts = [
+      'Коты спят 70% жизни 😴',
+      'Мед никогда не портится 🍯',
+      'Телеграм создали в 2013 году'
+    ];
+    bot.sendMessage(chatId, 'Факт: ' + facts[Math.floor(Math.random() * facts.length)]);
+  }
+  else if (!text.startsWith('/')) {
+    // Если обычное сообщение - отправляем ИИ
+    if (text !== '❓ Спросить у ИИ' && text !== '📞 Контакты' && 
+        text !== '🕐 Время' && text !== '🎲 Факт') {
+      
+      const thinkingMsg = await bot.sendMessage(chatId, '🤔 Думаю над ответом...');
+      const aiResponse = await askHuggingFace(text);
+      
+      // Удаляем сообщение "Думаю..." и отправляем ответ
+      bot.deleteMessage(chatId, thinkingMsg.message_id);
+      bot.sendMessage(chatId, aiResponse);
+    }
   }
 });
 
-console.log('Улучшенный бот запущен!');
+console.log('Бот с Hugging Face ИИ запущен!');
