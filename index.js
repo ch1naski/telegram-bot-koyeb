@@ -16,17 +16,23 @@ app.listen(port, '0.0.0.0', () => {
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Функция для запроса к Hugging Face
+// Улучшенная функция с таймаутами
 async function askAI(question) {
   try {
     console.log('Asking AI:', question);
     
-    const response = await axios.post(
+    // Создаем промис с таймаутом
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout')), 25000);
+    });
+    
+    // Запрос к ИИ
+    const aiPromise = axios.post(
       'https://api-inference.huggingface.co/models/TinyLlama/TinyLlama-1.1B-Chat-v1.0',
       {
         inputs: question,
         parameters: {
-          max_new_tokens: 250,
+          max_new_tokens: 150,
           temperature: 0.7,
           do_sample: true
         }
@@ -35,32 +41,40 @@ async function askAI(question) {
         headers: {
           'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
           'Content-Type': 'application/json'
-        },
-        timeout: 45000
+        }
       }
     );
 
-    console.log('AI Response:', response.data);
+    // Ждем либо ответ, либо таймаут
+    const response = await Promise.race([aiPromise, timeoutPromise]);
+    console.log('AI Response received');
 
     if (response.data && response.data[0] && response.data[0].generated_text) {
       let answer = response.data[0].generated_text;
       if (answer.includes(question)) {
         answer = answer.replace(question, '').trim();
       }
-      return answer;
+      return answer || '🤖 ИИ сгенерировал ответ, но он пустой.';
     } else {
-      return '🤖 ИИ обработал запрос, но ответ имеет неожиданный формат.';
+      return '🤖 ИИ обработал запрос, но не смог сгенерировать текст.';
     }
+    
   } catch (error) {
-    console.log('Hugging Face Error:', error.response?.data || error.message);
+    console.log('AI Error:', error.message, error.response?.status);
+    
+    if (error.message === 'Timeout') {
+      return '⏰ ИИ не ответил за 25 секунд. Модель может быть перегружена. Попробуй позже.';
+    }
     
     if (error.response?.status === 503) {
-      const estimatedTime = error.response.data.estimated_time;
-      console.log(`Model is loading. Estimated time: ${estimatedTime} seconds.`);
-      return `⚠️ Модель загружается... Подожди ${estimatedTime || 30} секунд и попробуй снова.`;
+      return '🔧 Модель загружается. Попробуй через 1-2 минуты.';
     }
     
-    return '⚠️ Не удалось получить ответ от ИИ. Попробуй спросить что-то другое.';
+    if (error.response?.status === 404) {
+      return '❌ Модель не найдена. Используем запасной вариант.';
+    }
+    
+    return '⚠️ Ошибка соединения с ИИ. Попробуй другой вопрос.';
   }
 }
 
@@ -71,20 +85,16 @@ bot.onText(/\/start/, (msg) => {
     reply_markup: {
       keyboard: [
         ['🧠 Спросить ИИ', '📞 Контакты'],
-        ['🕐 Время', 'ℹ️ О боте']
+        ['🕐 Время', 'ℹ️ Статус']
       ],
       resize_keyboard: true
     }
   };
   
   bot.sendMessage(chatId, 
-    'Привет! Я бот с *настоящим ИИ*! 🧠\n\n' +
-    'Задай *ЛЮБОЙ* вопрос - я использую нейросеть TinyLlama для генерации ответов!\n\n' +
-    'Примеры:\n' +
-    '• "Объясни квантовую физику"\n' + 
-    '• "Напиши стих про кота"\n' +
-    '• "Что такое черные дыры?"\n\n' +
-    'Первый запрос может занять до 30 секунд!', 
+    'Привет! Я бот с ИИ! 🧠\n\n' +
+    'Задай вопрос - я попробую получить ответ от нейросети.\n\n' +
+    '*Внимание:* ИИ может быть медленным или недоступным на бесплатном хостинге.', 
     options
   );
 });
@@ -97,36 +107,29 @@ bot.on('message', async (msg) => {
   if (!text || text.startsWith('/')) return;
 
   if (text === '🧠 Спросить ИИ') {
-    bot.sendMessage(chatId, 'Напиши любой вопрос! Я использую нейросеть TinyLlama для генерации ответов! 🧠\n\n*Первый запрос может занять до 30 секунд*');
+    bot.sendMessage(chatId, 'Напиши вопрос! Пробую подключиться к нейросети... 🧠');
   } 
   else if (text === '📞 Контакты') {
-    bot.sendMessage(chatId, '👨‍💻 Создатель: @ch0nyatski\n\nБот с интеграцией Hugging Face ИИ');
+    bot.sendMessage(chatId, 'Создатель: @ch0nyatski');
   }
   else if (text === '🕐 Время') {
-    bot.sendMessage(chatId, `🕐 Точное время: ${new Date().toLocaleString('ru-RU')}`);
+    bot.sendMessage(chatId, `Время: ${new Date().toLocaleString('ru-RU')}`);
   }
-  else if (text === 'ℹ️ О боте') {
-    bot.sendMessage(chatId, 
-      '🤖 *О боте:*\n\n' +
-      '• *Модель ИИ:* TinyLlama 1.1B\n' +
-      '• *Платформа:* Hugging Face\n' + 
-      '• *Технологии:* Node.js + Express\n' +
-      '• *Хостинг:* Koyeb\n\n' +
-      'Этот бот использует настоящую нейросеть!'
-    );
+  else if (text === 'ℹ️ Статус') {
+    bot.sendMessage(chatId, '🤖 Бот активен\n🧠 ИИ: пробуем подключиться\n⚡ Скорость: зависит от нагрузки');
   }
   else {
-    const thinkingMsg = await bot.sendMessage(chatId, '🧠 Нейросеть генерирует ответ...\n*Это может занять до 30 секунд*');
+    const thinkingMsg = await bot.sendMessage(chatId, '🧠 Пробую подключиться к ИИ...');
     
     try {
       const aiResponse = await askAI(text);
       bot.deleteMessage(chatId, thinkingMsg.message_id);
-      bot.sendMessage(chatId, `🤖 *Ответ ИИ:*\n\n${aiResponse}`);
+      bot.sendMessage(chatId, `🤖 *Результат:*\n\n${aiResponse}`);
     } catch (error) {
       bot.deleteMessage(chatId, thinkingMsg.message_id);
-      bot.sendMessage(chatId, '❌ Произошла ошибка при обращении к ИИ. Попробуйте позже.');
+      bot.sendMessage(chatId, '❌ Критическая ошибка. Попробуй перезапустить бота командой /start');
     }
   }
 });
 
-console.log('Бот с TinyLlama ИИ запущен!');
+console.log('Бот с улучшенными таймаутами запущен!');
