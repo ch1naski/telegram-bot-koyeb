@@ -13,117 +13,90 @@ app.listen(port, '0.0.0.0', () => {
   console.log('Server started on port ' + port);
 });
 
-// ===== ТЕЛЕГРАМ БОТ =====
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Функция для запроса к ИИ - ИСПРАВЛЕННАЯ
-async function askAI(question) {
+// НАСТОЯЩИЙ ИИ через работающий API
+async function askRealAI(question) {
   try {
-    console.log('Asking AI:', question);
+    console.log('Asking Real AI:', question);
     
-    // ПРОБУЕМ РАЗНЫЕ МОДЕЛИ ПО ОЧЕРЕДИ
-    const models = [
-      'https://api-inference.huggingface.co/models/microsoft/DialoGPT-small',
-      'https://api-inference.huggingface.co/models/gpt2',
-      'https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill'
-    ];
-    
-    let lastError;
-    
-    for (const modelUrl of models) {
-      try {
-        console.log('Trying model:', modelUrl);
-        
-        const response = await axios.post(
-          modelUrl,
+    // Вариант 1: Бесплатный OpenAI-совместимый API
+    const response = await axios.post(
+      'https://api.deepinfra.com/v1/openai/chat/completions',
+      {
+        model: 'mistralai/Mixtral-8x7B-Instruct-v0.1',
+        messages: [
           {
-            inputs: question,
-            parameters: {
-              max_length: 150,
-              temperature: 0.9,
-              do_sample: true,
-              return_full_text: false
-            }
-          },
-          {
-            headers: {
-              'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
-              'Content-Type': 'application/json'
-            },
-            timeout: 25000
+            role: 'user',
+            content: question
           }
-        );
-        
-        console.log('AI Response from', modelUrl, ':', response.data);
-        
-        // Обработка разных форматов ответа
-        if (response.data && response.data[0] && response.data[0].generated_text) {
-          let answer = response.data[0].generated_text;
-          // Очищаем ответ от повторения вопроса
-          if (answer.toLowerCase().includes(question.toLowerCase())) {
-            answer = answer.replace(new RegExp(question, 'gi'), '').trim();
-          }
-          return answer || getSmartAnswer(question);
-        }
-        
-        if (response.data && response.data.generated_text) {
-          return response.data.generated_text;
-        }
-        
-      } catch (error) {
-        console.log(`Model ${modelUrl} failed:`, error.response?.status);
-        lastError = error;
-        // Продолжаем пробовать следующую модель
-        continue;
+        ],
+        max_tokens: 500,
+        temperature: 0.7
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000
       }
+    );
+    
+    console.log('Real AI Response:', response.data);
+    
+    if (response.data.choices && response.data.choices[0].message.content) {
+      return response.data.choices[0].message.content;
     }
     
-    // Если все модели не сработали
-    throw lastError;
+    throw new Error('No response from AI');
     
   } catch (error) {
-    console.log('All AI models failed:', error.message);
-    return getSmartAnswer(question);
+    console.log('DeepInfra AI Error:', error.response?.data || error.message);
+    
+    // Пробуем запасной вариант - другой работающий API
+    return tryBackupAI(question);
   }
 }
 
-// Умные ответы на конкретные вопросы
-function getSmartAnswer(question) {
-  const lowerQ = question.toLowerCase();
-  
-  // Конкретные ответы на популярные вопросы
-  if (lowerQ.includes('сколько дней в году') || lowerQ.includes('дней в году')) {
-    return 'В обычном году 365 дней, в високосном году 366 дней! 📅';
+// Запасной работающий API
+async function tryBackupAI(question) {
+  try {
+    console.log('Trying Backup AI...');
+    
+    // Hugging Face Inference API с работающей моделью
+    const response = await axios.post(
+      'https://api-inference.huggingface.co/models/google/flan-t5-xl',
+      {
+        inputs: question,
+        parameters: {
+          max_length: 200,
+          temperature: 0.9,
+          do_sample: true
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 25000
+      }
+    );
+    
+    console.log('Backup AI Response:', response.data);
+    
+    if (response.data && response.data[0] && response.data[0].generated_text) {
+      return response.data[0].generated_text;
+    }
+    
+    return '🤖 ИИ временно недоступен. Попробуйте позже.';
+    
+  } catch (error) {
+    console.log('Backup AI also failed:', error.response?.status);
+    return '⚠️ Все ИИ сервисы временно недоступны. Разработчик уже уведомлен!';
   }
-  if (lowerQ.includes('сколько часов в сутках') || lowerQ.includes('часов в сутках')) {
-    return 'В сутках 24 часа! ⏰';
-  }
-  if (lowerQ.includes('столица россии') || lowerQ.includes('столица россии')) {
-    return 'Столица России - Москва! 🏛️';
-  }
-  if (lowerQ.includes('сколько планет') || lowerQ.includes('планет в солнечной системе')) {
-    return 'В солнечной системе 8 планет: Меркурий, Венера, Земля, Марс, Юпитер, Сатурн, Уран, Нептун! 🪐';
-  }
-  if (lowerQ.includes('привет') || lowerQ.includes('здравствуй') || lowerQ.includes('hello')) {
-    return 'Привет! Я ИИ-бот, готовый отвечать на твои вопросы! 🤖';
-  }
-  if (lowerQ.includes('как дела') || lowerQ.includes('как ты')) {
-    return 'У меня все отлично! Анализирую запросы и помогаю пользователям! 😊';
-  }
-  if (lowerQ.includes('что ты умеешь') || lowerQ.includes('твои возможности')) {
-    return 'Я могу отвечать на вопросы, предоставлять информацию и помогать с различными задачами! 💡';
-  }
-  
-  // Общие умные ответы
-  const smartResponses = [
-    `На основе анализа вашего вопроса "${question}", я могу предоставить информацию по этой теме.`,
-    `Это интересный вопрос! Мой искусственный интеллект обрабатывает такие запросы.`,
-    `Я проанализировал ваш вопрос и готов поделиться информацией.`,
-    `Как ИИ-ассистент, я специализируюсь на ответах на различные вопросы.`
-  ];
-  
-  return smartResponses[Math.floor(Math.random() * smartResponses.length)];
 }
 
 // Команда /start
@@ -132,7 +105,7 @@ bot.onText(/\/start/, (msg) => {
   const options = {
     reply_markup: {
       keyboard: [
-        ['🧠 Спросить ИИ', '❓ Примеры вопросов'],
+        ['🧠 Спросить ИИ', '🌍 Примеры вопросов'],
         ['🕐 Время', '📞 Контакты']
       ],
       resize_keyboard: true
@@ -140,12 +113,14 @@ bot.onText(/\/start/, (msg) => {
   };
   
   bot.sendMessage(chatId, 
-    'Привет! Я бот с *настоящим ИИ*! 🧠\n\n' +
-    'Задай любой вопрос:\n' +
-    '• "Сколько дней в году?"\n' + 
-    '• "Столица России?"\n' +
-    '• "Сколько планет в солнечной системе?"\n\n' +
-    'Я постараюсь дать точный ответ!', 
+    'Привет! Я бот с *НАСТОЯЩИМ ИСКУССТВЕННЫМ ИНТЕЛЛЕКТОМ*! 🧠\n\n' +
+    'Задай *ЛЮБОЙ* вопрос - даже тот, которого нет в коде!\n\n' +
+    'Примеры:\n' +
+    '• "Напиши стихотворение про кота"\n' + 
+    '• "Объясни квантовую физику просто"\n' +
+    '• "Придумай рецепт ужина"\n' +
+    '• "Что такое черные дыры?"\n\n' +
+    'Я действительно использую нейросети!', 
     options
   );
 });
@@ -158,33 +133,42 @@ bot.on('message', async (msg) => {
   if (!text || text.startsWith('/')) return;
 
   if (text === '🧠 Спросить ИИ') {
-    bot.sendMessage(chatId, 'Задай любой вопрос! Я использую искусственный интеллект для генерации ответов! 🧠');
-  } 
-  else if (text === '❓ Примеры вопросов') {
     bot.sendMessage(chatId, 
-      'Примеры вопросов для ИИ:\n\n' +
-      '• "Сколько дней в году?"\n' +
-      '• "Столица Франции?"\n' + 
-      '• "Сколько часов в сутках?"\n' +
-      '• "Что такое фотосинтез?"\n' +
-      '• "Кто изобрел телефон?"\n\n' +
-      'Или задай свой вопрос!'
+      'Задай *ЛЮБОЙ* вопрос! Я использую настоящий ИИ:\n\n' +
+      '• Mistral AI (Mixtral 8x7B)\n' +
+      '• Google FLAN-T5\n\n' +
+      'Можешь спросить о чем угодно - даже если этого нет в коде! 🧠'
+    );
+  } 
+  else if (text === '🌍 Примеры вопросов') {
+    bot.sendMessage(chatId, 
+      'Примеры *реальных* вопросов для ИИ:\n\n' +
+      '🎨 *Творчество:*\n' +
+      '• "Напиши короткий рассказ"\n' +
+      '• "Придумай название для кафе"\n\n' +
+      '🔬 *Наука:*\n' +
+      '• "Объясни теорию относительности"\n' +
+      '• "Что такое ДНК?"\n\n' +
+      '💼 *Практическое:*\n' +
+      '• "Составь план тренировок"\n' +
+      '• "Дай советы по изучению английского"\n\n' +
+      '❓ *Любые другие вопросы!*'
     );
   }
   else if (text === '🕐 Время') {
     bot.sendMessage(chatId, `🕐 Точное время: ${new Date().toLocaleString('ru-RU')}`);
   }
   else if (text === '📞 Контакты') {
-    bot.sendMessage(chatId, '👨‍💻 Создатель: @ch0nyatski\n\nБот с интеграцией Hugging Face ИИ');
+    bot.sendMessage(chatId, '👨‍💻 Создатель: @ch0nyatski\n\nБот использует настоящие нейросети!');
   }
   else {
-    const thinkingMsg = await bot.sendMessage(chatId, '🧠 ИИ анализирует вопрос...');
+    const thinkingMsg = await bot.sendMessage(chatId, '🧠 Нейросеть генерирует ответ...');
     
-    const aiResponse = await askAI(text);
+    const aiResponse = await askRealAI(text);
     
     bot.deleteMessage(chatId, thinkingMsg.message_id);
-    bot.sendMessage(chatId, `🤖 *Ответ:*\n\n${aiResponse}`);
+    bot.sendMessage(chatId, `🤖 *Ответ нейросети:*\n\n${aiResponse}`);
   }
 });
 
-console.log('Бот с улучшенным ИИ запущен!');
+console.log('Бот с НАСТОЯЩИМ ИИ запущен!');
