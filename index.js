@@ -8,7 +8,7 @@ const app = express();
 const port = process.env.PORT || 8000;
 
 app.get('/', (req, res) => {
-  res.send('Bot is running!');
+  res.send('Bot with AI is running!');
 });
 
 app.listen(port, '0.0.0.0', () => {
@@ -27,17 +27,16 @@ bot.on('polling_error', (error) => {
   console.log('Polling error:', error.message);
 });
 
-// Функция для запроса к Hugging Face (исправленная версия)
+// Функция для запроса к Hugging Face - ИСПРАВЛЕННАЯ
 async function askHuggingFace(question) {
   try {
     console.log('Sending to HF:', question);
     
     const response = await axios.post(
-      // Используем более новую модель
-      'https://api-inference.huggingface.co/models/microsoft/DialoGPT-large',
+      // ИСПОЛЬЗУЕМ РАБОЧУЮ ПУБЛИЧНУЮ МОДЕЛЬ
+      'https://api-inference.huggingface.co/models/gpt2',
       {
         inputs: question,
-        // Параметры помогают управлять ответом
         parameters: {
           max_new_tokens: 100,
           temperature: 0.7,
@@ -55,16 +54,23 @@ async function askHuggingFace(question) {
     
     console.log('HF Response:', response.data);
     
-    // Обработка ответа может немного отличаться
+    // Обработка ответа для модели gpt2
     if (response.data && response.data[0] && response.data[0].generated_text) {
       return response.data[0].generated_text;
     } else {
       return '🤖 ИИ обработал запрос, но не сгенерировал ответ.';
     }
   } catch (error) {
-    // Более детальное логирование ошибки
-    console.log('Hugging Face Error Details:', error.response?.status, error.response?.data);
-    return '⚠️ ИИ временно недоступен. Попробуйте позже.';
+    console.log('Hugging Face Error:', error.response?.status, error.response?.data);
+    
+    // Более информативные ошибки
+    if (error.response?.status === 503) {
+      return '⚠️ Модель загружается, попробуйте через 30 секунд...';
+    } else if (error.response?.status === 404) {
+      return '⚠️ Модель временно недоступна. Используйте другие команды бота.';
+    } else {
+      return '⚠️ ИИ временно недоступен. Попробуйте позже.';
+    }
   }
 }
 
@@ -91,6 +97,9 @@ bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
+  // Игнорируем служебные сообщения
+  if (!text || text.startsWith('/')) return;
+
   if (text === '❓ Спросить у ИИ') {
     bot.sendMessage(chatId, 'Напиши свой вопрос и я передам его ИИ!');
   } 
@@ -104,23 +113,20 @@ bot.on('message', async (msg) => {
     const facts = [
       'Коты спят 70% жизни 😴',
       'Мед никогда не портится 🍯',
-      'Телеграм создали в 2013 году'
+      'Телеграм создали в 2013 году',
+      'Python назван в честь комедийного шоу 🐍'
     ];
     bot.sendMessage(chatId, 'Факт: ' + facts[Math.floor(Math.random() * facts.length)]);
   }
-  else if (!text.startsWith('/')) {
+  else {
     // Если обычное сообщение - отправляем ИИ
-    if (text !== '❓ Спросить у ИИ' && text !== '📞 Контакты' && 
-        text !== '🕐 Время' && text !== '🎲 Факт') {
-      
-      const thinkingMsg = await bot.sendMessage(chatId, '🤔 Думаю над ответом...');
-      const aiResponse = await askHuggingFace(text);
-      
-      // Удаляем сообщение "Думаю..." и отправляем ответ
-      bot.deleteMessage(chatId, thinkingMsg.message_id);
-      bot.sendMessage(chatId, aiResponse);
-    }
+    const thinkingMsg = await bot.sendMessage(chatId, '🤔 Думаю над ответом...');
+    const aiResponse = await askHuggingFace(text);
+    
+    // Удаляем сообщение "Думаю..." и отправляем ответ
+    bot.deleteMessage(chatId, thinkingMsg.message_id);
+    bot.sendMessage(chatId, aiResponse);
   }
 });
 
-console.log('Бот с Hugging Face ИИ запущен!');
+console.log('Бот с GPT2 ИИ запущен!');
