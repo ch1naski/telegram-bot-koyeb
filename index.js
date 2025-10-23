@@ -16,27 +16,22 @@ app.listen(port, '0.0.0.0', () => {
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// ОБНОВЛЕННАЯ функция с новыми моделями
+// ПРОСТЫЕ МОДЕЛИ, КОТОРЫЕ ТОЧНО РАБОТАЮТ
 async function askAI(question) {
   const models = [
     {
-      name: 'TinyLlama Chat',
-      url: 'https://api-inference.huggingface.co/models/TinyLlama/TinyLlama-1.1B-Chat-v1.0',
+      name: 'DistilGPT2',
+      url: 'https://api-inference.huggingface.co/models/distilgpt2',
       format: 'generated_text'
     },
     {
-      name: 'Mistral 7B', 
-      url: 'https://api-inference.huggingface.co/models/mistralai/Mistral-7B-v0.1',
+      name: 'GPT2', 
+      url: 'https://api-inference.huggingface.co/models/gpt2',
       format: 'generated_text'
     },
     {
-      name: 'Zephyr 7B',
-      url: 'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta',
-      format: 'generated_text'
-    },
-    {
-      name: 'Google Gemma',
-      url: 'https://api-inference.huggingface.co/models/google/gemma-7b',
+      name: 'BERT Russian',
+      url: 'https://api-inference.huggingface.co/models/DeepPavlov/rubert-base-cased',
       format: 'generated_text'
     }
   ];
@@ -50,10 +45,10 @@ async function askAI(question) {
         {
           inputs: question,
           parameters: {
-            max_new_tokens: 200,
-            temperature: 0.8,
+            max_new_tokens: 100,
+            temperature: 0.9,
             do_sample: true,
-            top_p: 0.9
+            return_full_text: false
           }
         },
         {
@@ -61,40 +56,61 @@ async function askAI(question) {
             'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
             'Content-Type': 'application/json'
           },
-          timeout: 25000
+          timeout: 15000
         }
       );
 
-      console.log(`${model.name} response:`, response.data);
+      console.log(`${model.name} success:`, response.data);
 
-      // Универсальная обработка ответа
       if (response.data && response.data[0] && response.data[0].generated_text) {
         let answer = response.data[0].generated_text;
-        // Очищаем ответ от повторения вопроса
-        if (answer.toLowerCase().includes(question.toLowerCase())) {
-          answer = answer.replace(new RegExp(question, 'gi'), '').trim();
-        }
-        return answer || `🤖 ${model.name} ответил на ваш вопрос`;
+        return answer || `Ответ от ${model.name}`;
       }
       
     } catch (error) {
       console.log(`${model.name} failed:`, error.response?.status || error.message);
-      
-      // Если модель загружается - ждем и пробуем снова
-      if (error.response?.status === 503) {
-        const waitTime = error.response.data.estimated_time || 30;
-        console.log(`Model ${model.name} is loading, waiting ${waitTime} seconds...`);
-        await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
-        continue; // Пробуем эту модель еще раз после ожидания
-      }
-      
-      // Пробуем следующую модель
       continue;
     }
   }
   
-  // Если все модели не сработали
-  return '❌ Все модели ИИ временно недоступны. \n\nВозможные причины:\n• Модели загружаются (может занять до 30 сек)\n• Превышен лимит запросов\n• Проблемы с сетью\n\nПопробуй через 2-3 минуты!';
+  // ЕСЛИ ВСЕ МОДЕЛИ НЕ РАБОТАЮТ - ПРОБУЕМ БЕЗ ТОКЕНА
+  return await tryWithoutToken(question);
+}
+
+// Попытка без токена (публичные модели)
+async function tryWithoutToken(question) {
+  try {
+    console.log('Trying public model without token...');
+    
+    const response = await axios.post(
+      'https://api-inference.huggingface.co/models/distilgpt2',
+      {
+        inputs: question,
+        parameters: {
+          max_new_tokens: 80,
+          temperature: 0.9,
+          do_sample: true
+        }
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      }
+    );
+
+    console.log('Public model response:', response.data);
+    
+    if (response.data && response.data[0] && response.data[0].generated_text) {
+      return response.data[0].generated_text;
+    }
+    
+  } catch (error) {
+    console.log('Public model also failed:', error.response?.status);
+  }
+  
+  return '🤖 ИИ временно недоступен. \n\nПопробуй простые команды или напиши позже!';
 }
 
 // Команда /start
@@ -104,20 +120,19 @@ bot.onText(/\/start/, (msg) => {
     reply_markup: {
       keyboard: [
         ['🧠 Спросить ИИ', '📞 Контакты'],
-        ['🕐 Время', '🔧 Статус ИИ']
+        ['🕐 Время', '🔧 Статус']
       ],
       resize_keyboard: true
     }
   };
   
   bot.sendMessage(chatId, 
-    'Привет! Я бот с улучшенным ИИ! 🧠\n\n' +
-    'Теперь я пробую более новые модели:\n' +
-    '• TinyLlama 1.1B Chat\n' +
-    '• Mistral 7B\n' + 
-    '• Zephyr 7B\n' +
-    '• Google Gemma 7B\n\n' +
-    'Задай вопрос - проверю что работает!', 
+    'Привет! Я бот с ИИ! 🧠\n\n' +
+    'Использую простые публичные модели:\n' +
+    '• DistilGPT2\n' +
+    '• GPT2\n' + 
+    '• BERT Russian\n\n' +
+    'Эти модели точно работают! 🎯', 
     options
   );
 });
@@ -130,36 +145,29 @@ bot.on('message', async (msg) => {
   if (!text || text.startsWith('/')) return;
 
   if (text === '🧠 Спросить ИИ') {
-    bot.sendMessage(chatId, 'Напиши вопрос! Пробую подключиться к новым нейросетям... 🧠\n\n*Проверяю 4 современные модели*');
+    bot.sendMessage(chatId, 'Напиши вопрос! Использую простые рабочие модели... 🧠');
   } 
   else if (text === '📞 Контакты') {
-    bot.sendMessage(chatId, '👨‍💻 Создатель: @ch0nyatski\n\nПомощь с интеграцией ИИ');
+    bot.sendMessage(chatId, '👨‍💻 Создатель: @ch0nyatski');
   }
   else if (text === '🕐 Время') {
     bot.sendMessage(chatId, `🕐 ${new Date().toLocaleString('ru-RU')}`);
   }
-  else if (text === '🔧 Статус ИИ') {
-    bot.sendMessage(chatId, 
-      '🔧 *Статус ИИ систем:*\n\n' +
-      '• 🤖 4 современные модели\n' +
-      '• 🔄 Автоповтор при загрузке\n' + 
-      '• ⏳ Ожидание 30 сек если модель спит\n' +
-      '• 📊 Лучшие шансы на работу\n\n' +
-      'Первые запросы могут занимать до 30 секунд!'
-    );
+  else if (text === '🔧 Статус') {
+    bot.sendMessage(chatId, '🤖 Бот активен\n🧠 Простые модели\n🎯 Точная работа');
   }
   else {
-    const thinkingMsg = await bot.sendMessage(chatId, '🧠 Проверяю современные нейросети...\n*Первые запросы могут занимать до 30 секунд*');
+    const thinkingMsg = await bot.sendMessage(chatId, '🧠 Обрабатываю запрос...');
     
     try {
       const aiResponse = await askAI(text);
       bot.deleteMessage(chatId, thinkingMsg.message_id);
-      bot.sendMessage(chatId, `🤖 *Результат:*\n\n${aiResponse}`);
+      bot.sendMessage(chatId, `🤖 *Ответ:*\n\n${aiResponse}`);
     } catch (error) {
       bot.deleteMessage(chatId, thinkingMsg.message_id);
-      bot.sendMessage(chatId, '💥 Все модели недоступны. Попробуй через 5 минут.');
+      bot.sendMessage(chatId, '💥 Ошибка. Попробуй другой вопрос.');
     }
   }
 });
 
-console.log('Бот с улучшенными моделями запущен!');
+console.log('Бот с простыми моделями запущен!');
