@@ -27,15 +27,22 @@ bot.on('polling_error', (error) => {
   console.log('Polling error:', error.message);
 });
 
-// Функция для запроса к Hugging Face
+// Функция для запроса к Hugging Face (исправленная версия)
 async function askHuggingFace(question) {
   try {
     console.log('Sending to HF:', question);
     
     const response = await axios.post(
-      'https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium',
+      // Используем более новую модель
+      'https://api-inference.huggingface.co/models/microsoft/DialoGPT-large',
       {
-        inputs: question
+        inputs: question,
+        // Параметры помогают управлять ответом
+        parameters: {
+          max_new_tokens: 100,
+          temperature: 0.7,
+          do_sample: true
+        }
       },
       {
         headers: {
@@ -48,13 +55,15 @@ async function askHuggingFace(question) {
     
     console.log('HF Response:', response.data);
     
-    if (response.data && response.data.generated_text) {
-      return response.data.generated_text;
+    // Обработка ответа может немного отличаться
+    if (response.data && response.data[0] && response.data[0].generated_text) {
+      return response.data[0].generated_text;
     } else {
-      return '🤖 ИИ обработал запрос, но не сгенерировал ответ';
+      return '🤖 ИИ обработал запрос, но не сгенерировал ответ.';
     }
   } catch (error) {
-    console.log('Hugging Face Error:', error.response?.data || error.message);
+    // Более детальное логирование ошибки
+    console.log('Hugging Face Error Details:', error.response?.status, error.response?.data);
     return '⚠️ ИИ временно недоступен. Попробуйте позже.';
   }
 }
