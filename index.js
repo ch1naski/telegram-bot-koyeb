@@ -27,20 +27,20 @@ bot.on('polling_error', (error) => {
   console.log('Polling error:', error.message);
 });
 
-// Функция для запроса к Hugging Face - ИСПРАВЛЕННАЯ
+// Функция для запроса к Hugging Face - УЛУЧШЕННАЯ
 async function askHuggingFace(question) {
   try {
     console.log('Sending to HF:', question);
     
     const response = await axios.post(
-      // ИСПОЛЬЗУЕМ РАБОЧУЮ ПУБЛИЧНУЮ МОДЕЛЬ
-      'https://api-inference.huggingface.co/models/gpt2',
+      // ИСПОЛЬЗУЕМ МОДЕЛЬ, КОТОРАЯ ТОЧНО РАБОТАЕТ
+      'https://api-inference.huggingface.co/models/microsoft/DialoGPT-small',
       {
-        inputs: question,
-        parameters: {
-          max_new_tokens: 100,
-          temperature: 0.7,
-          do_sample: true
+        inputs: {
+          text: question,
+          // Добавляем контекст для лучших ответов
+          past_user_inputs: [],
+          generated_responses: []
         }
       },
       {
@@ -48,29 +48,32 @@ async function askHuggingFace(question) {
           'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
           'Content-Type': 'application/json'
         },
-        timeout: 30000
+        timeout: 45000 // Увеличиваем таймаут
       }
     );
     
     console.log('HF Response:', response.data);
     
-    // Обработка ответа для модели gpt2
-    if (response.data && response.data[0] && response.data[0].generated_text) {
-      return response.data[0].generated_text;
+    // Обработка ответа для DialoGPT
+    if (response.data && response.data.generated_text) {
+      return response.data.generated_text;
     } else {
       return '🤖 ИИ обработал запрос, но не сгенерировал ответ.';
     }
   } catch (error) {
     console.log('Hugging Face Error:', error.response?.status, error.response?.data);
     
-    // Более информативные ошибки
+    // Если модель загружается - пробуем подождать
     if (error.response?.status === 503) {
-      return '⚠️ Модель загружается, попробуйте через 30 секунд...';
-    } else if (error.response?.status === 404) {
-      return '⚠️ Модель временно недоступна. Используйте другие команды бота.';
-    } else {
-      return '⚠️ ИИ временно недоступен. Попробуйте позже.';
+      const waitTime = error.response.data.estimated_time || 30;
+      console.log(`Model is loading, waiting ${waitTime} seconds...`);
+      
+      // Ждем и пробуем снова
+      await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+      return askHuggingFace(question); // Рекурсивный вызов
     }
+    
+    return '⚠️ ИИ временно недоступен. Используйте другие команды бота.';
   }
 }
 
@@ -87,7 +90,7 @@ bot.onText(/\/start/, (msg) => {
   };
   
   bot.sendMessage(msg.chat.id, 
-    'Привет! Я бот с ИИ от Hugging Face! 🧠\nНапиши любой вопрос или нажми "Спросить у ИИ"', 
+    'Привет! Я бот с ИИ от Hugging Face! 🧠\nНапиши любой вопрос или нажми "Спросить у ИИ"\n\n*ИИ может отведать 10-30 секунд при первом запросе*', 
     options
   );
 });
@@ -101,32 +104,40 @@ bot.on('message', async (msg) => {
   if (!text || text.startsWith('/')) return;
 
   if (text === '❓ Спросить у ИИ') {
-    bot.sendMessage(chatId, 'Напиши свой вопрос и я передам его ИИ!');
+    bot.sendMessage(chatId, 'Напиши свой вопрос и я передам его ИИ! 🧠\n\n*Первые ответы могут занимать до 30 секунд*');
   } 
   else if (text === '📞 Контакты') {
     bot.sendMessage(chatId, 'Создатель: @ch0nyatski');
   }
   else if (text === '🕐 Время') {
-    bot.sendMessage(chatId, 'Время: ' + new Date().toLocaleString('ru-RU'));
+    bot.sendMessage(chatId, '⏰ Время: ' + new Date().toLocaleString('ru-RU'));
   }
   else if (text === '🎲 Факт') {
     const facts = [
       'Коты спят 70% жизни 😴',
       'Мед никогда не портится 🍯',
       'Телеграм создали в 2013 году',
-      'Python назван в честь комедийного шоу 🐍'
+      'Python назван в честь комедийного шоу 🐍',
+      'Первый компьютерный вирус появился в 1986 году'
     ];
-    bot.sendMessage(chatId, 'Факт: ' + facts[Math.floor(Math.random() * facts.length)]);
+    bot.sendMessage(chatId, '📚 Факт: ' + facts[Math.floor(Math.random() * facts.length)]);
   }
   else {
     // Если обычное сообщение - отправляем ИИ
-    const thinkingMsg = await bot.sendMessage(chatId, '🤔 Думаю над ответом...');
-    const aiResponse = await askHuggingFace(text);
+    const thinkingMsg = await bot.sendMessage(chatId, '🤔 Думаю над ответом...\n*Это может занять до 30 секунд*');
     
-    // Удаляем сообщение "Думаю..." и отправляем ответ
-    bot.deleteMessage(chatId, thinkingMsg.message_id);
-    bot.sendMessage(chatId, aiResponse);
+    try {
+      const aiResponse = await askHuggingFace(text);
+      
+      // Удаляем сообщение "Думаю..." и отправляем ответ
+      bot.deleteMessage(chatId, thinkingMsg.message_id);
+      bot.sendMessage(chatId, aiResponse);
+    } catch (error) {
+      // Если ошибка - показываем сообщение об ошибке
+      bot.deleteMessage(chatId, thinkingMsg.message_id);
+      bot.sendMessage(chatId, '❌ Произошла ошибка при обращении к ИИ. Попробуйте позже.');
+    }
   }
 });
 
-console.log('Бот с GPT2 ИИ запущен!');
+console.log('Бот с DialoGPT-small ИИ запущен!');
