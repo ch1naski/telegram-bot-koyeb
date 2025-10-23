@@ -1,81 +1,51 @@
-const TelegramBot = require('node-telegram-bot-api');
-const express = require('express');
+// Функция для запроса к Hugging Face через Inference API
+async function askAI(question) {
+  try {
+    console.log('Asking AI:', question);
 
-const app = express();
-const port = process.env.PORT || 8000;
+    // Вариант с использованием API для чат-моделей
+    const response = await axios.post(
+      'https://api-inference.huggingface.co/models/TinyLlama/TinyLlama-1.1B-Chat-v1.0',
+      {
+        inputs: question,
+        parameters: {
+          max_new_tokens: 250,
+          temperature: 0.7,
+          do_sample: true
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 45000 // Увеличиваем таймаут для загрузки модели
+      }
+    );
 
-app.get('/', (req, res) => {
-  res.send('Bot with AI is running!');
-});
+    console.log('AI Response:', response.data);
 
-app.listen(port, '0.0.0.0', () => {
-  console.log('Server started on port ' + port);
-});
-
-// ===== ТЕЛЕГРАМ БОТ =====
-const token = process.env.BOT_TOKEN;
-const bot = new TelegramBot(token, { polling: true });
-
-// ОТЛАДОЧНЫЕ СООБЩЕНИЯ
-console.log('Bot token exists:', !!token);
-console.log('Bot initialized');
-
-bot.on('polling_error', (error) => {
-  console.log('Polling error:', error.message);
-});
-
-// Простая функция для теста
-function quickAIResponse(question) {
-  return `🤖 Я получил ваш вопрос: "${question}"\n\nЭто тестовый ответ от ИИ! Работаю над интеграцией настоящей нейросети... 🧠`;
-}
-
-// Команда /start
-bot.onText(/\/start/, (msg) => {
-  console.log('/start command received from:', msg.chat.id);
-  const chatId = msg.chat.id;
-  
-  const options = {
-    reply_markup: {
-      keyboard: [
-        ['🧠 Тест ИИ', '📞 Контакты'],
-        ['🕐 Время', 'ℹ️ Статус']
-      ],
-      resize_keyboard: true
+    // Обработка ответа для текстовой генерации
+    if (response.data && response.data[0] && response.data[0].generated_text) {
+      let answer = response.data[0].generated_text;
+      // Очищаем ответ, удаляя оригинальный вопрос, если он есть
+      if (answer.includes(question)) {
+        answer = answer.replace(question, '').trim();
+      }
+      return answer;
+    } else {
+      return '🤖 ИИ обработал запрос, но ответ имеет неожиданный формат.';
     }
-  };
-  
-  bot.sendMessage(chatId, 
-    'Привет! Я бот в режиме отладки 🛠️\n\n' +
-    'Нажми "🧠 Тест ИИ" чтобы проверить работу', 
-    options
-  );
-});
-
-// Обработка ВСЕХ сообщений
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-
-  console.log('Message received:', { chatId, text });
-
-  if (!text) return;
-
-  // Игнорируем команды кроме /start
-  if (text.startsWith('/') && text !== '/start') return;
-
-  if (text === '🧠 Тест ИИ') {
-    console.log('Test AI button pressed');
-    bot.sendMessage(chatId, 'Напиши любой вопрос для теста ИИ!');
-  } 
-  else if (text === '📞 Контакты') {
-    bot.sendMessage(chatId, 'Создатель: @ch0nyatski');
+  } catch (error) {
+    console.log('Hugging Face Error:', error.response?.data || error.message);
+    
+    // Обработка ошибки "модель загружается"
+    if (error.response?.status === 503) {
+      const estimatedTime = error.response.data.estimated_time;
+      console.log(`Model is loading. Estimated time: ${estimatedTime} seconds.`);
+      return `⚠️ Модель просыпается и загружается. Это займет около ${estimatedTime || 30} секунд. Пожалуйста, повтори запрос через минуту.`;
+    }
+    
+    return '⚠️ Не удалось получить ответ от ИИ. Попробуй спросить что-то другое.';
   }
-  else if (text === '🕐 Время') {
-    bot.sendMessage(chatId, `Время: ${new Date().toLocaleString('ru-RU')}`);
-  }
-  else if (text === 'ℹ️ Статус') {
-    bot.sendMessage(chatId, '🤖 Бот активен\n🛠️ Режим отладки\n🧠 ИИ в разработке');
-  }
-  else {
-    console.log('Processing question:', text);
-    const
+}
