@@ -16,23 +16,28 @@ app.listen(port, '0.0.0.0', () => {
 const token = process.env.BOT_TOKEN;
 const bot = new TelegramBot(token, { polling: true });
 
-// Функция, которая пробует разные модели
+// ОБНОВЛЕННАЯ функция с новыми моделями
 async function askAI(question) {
   const models = [
     {
-      name: 'Facebook Blenderbot',
-      url: 'https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill',
-      format: 'blenderbot'
+      name: 'TinyLlama Chat',
+      url: 'https://api-inference.huggingface.co/models/TinyLlama/TinyLlama-1.1B-Chat-v1.0',
+      format: 'generated_text'
     },
     {
-      name: 'Google T5', 
-      url: 'https://api-inference.huggingface.co/models/google/flan-t5-large',
-      format: 't5'
+      name: 'Mistral 7B', 
+      url: 'https://api-inference.huggingface.co/models/mistralai/Mistral-7B-v0.1',
+      format: 'generated_text'
     },
     {
-      name: 'Microsoft DialoGPT',
-      url: 'https://api-inference.huggingface.co/models/microsoft/DialoGPT-small', 
-      format: 'dialogpt'
+      name: 'Zephyr 7B',
+      url: 'https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta',
+      format: 'generated_text'
+    },
+    {
+      name: 'Google Gemma',
+      url: 'https://api-inference.huggingface.co/models/google/gemma-7b',
+      format: 'generated_text'
     }
   ];
 
@@ -45,9 +50,10 @@ async function askAI(question) {
         {
           inputs: question,
           parameters: {
-            max_new_tokens: 150,
-            temperature: 0.7,
-            do_sample: true
+            max_new_tokens: 200,
+            temperature: 0.8,
+            do_sample: true,
+            top_p: 0.9
           }
         },
         {
@@ -55,33 +61,40 @@ async function askAI(question) {
             'Authorization': `Bearer ${process.env.HUGGING_FACE_TOKEN}`,
             'Content-Type': 'application/json'
           },
-          timeout: 20000
+          timeout: 25000
         }
       );
 
       console.log(`${model.name} response:`, response.data);
 
-      // Обработка разных форматов ответов
-      if (model.format === 'blenderbot' && response.data && response.data.generated_text) {
-        return response.data.generated_text;
-      }
-      else if (response.data && response.data[0] && response.data[0].generated_text) {
+      // Универсальная обработка ответа
+      if (response.data && response.data[0] && response.data[0].generated_text) {
         let answer = response.data[0].generated_text;
-        if (answer.includes(question)) {
-          answer = answer.replace(question, '').trim();
+        // Очищаем ответ от повторения вопроса
+        if (answer.toLowerCase().includes(question.toLowerCase())) {
+          answer = answer.replace(new RegExp(question, 'gi'), '').trim();
         }
-        return answer || `Ответ от ${model.name}`;
+        return answer || `🤖 ${model.name} ответил на ваш вопрос`;
       }
       
     } catch (error) {
       console.log(`${model.name} failed:`, error.response?.status || error.message);
+      
+      // Если модель загружается - ждем и пробуем снова
+      if (error.response?.status === 503) {
+        const waitTime = error.response.data.estimated_time || 30;
+        console.log(`Model ${model.name} is loading, waiting ${waitTime} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
+        continue; // Пробуем эту модель еще раз после ожидания
+      }
+      
       // Пробуем следующую модель
       continue;
     }
   }
   
   // Если все модели не сработали
-  return '❌ Все модели ИИ временно недоступны. \n\nПопробуй:\\n• Перезагрузить бот через 5 минут\\n• Использовать другие команды\\n• Написать создателю: @ch0nyatski';
+  return '❌ Все модели ИИ временно недоступны. \n\nВозможные причины:\n• Модели загружаются (может занять до 30 сек)\n• Превышен лимит запросов\n• Проблемы с сетью\n\nПопробуй через 2-3 минуты!';
 }
 
 // Команда /start
@@ -98,11 +111,12 @@ bot.onText(/\/start/, (msg) => {
   };
   
   bot.sendMessage(chatId, 
-    'Привет! Я бот с ИИ от Hugging Face! 🧠\n\n' +
-    'Я пробую подключиться к разным нейросетям:\n' +
-    '• Facebook Blenderbot\n' +
-    '• Google T5\n' + 
-    '• Microsoft DialoGPT\n\n' +
+    'Привет! Я бот с улучшенным ИИ! 🧠\n\n' +
+    'Теперь я пробую более новые модели:\n' +
+    '• TinyLlama 1.1B Chat\n' +
+    '• Mistral 7B\n' + 
+    '• Zephyr 7B\n' +
+    '• Google Gemma 7B\n\n' +
     'Задай вопрос - проверю что работает!', 
     options
   );
@@ -116,7 +130,7 @@ bot.on('message', async (msg) => {
   if (!text || text.startsWith('/')) return;
 
   if (text === '🧠 Спросить ИИ') {
-    bot.sendMessage(chatId, 'Напиши вопрос! Пробую подключиться к доступным нейросетям... 🧠\n\n*Проверяю 3 разные модели*');
+    bot.sendMessage(chatId, 'Напиши вопрос! Пробую подключиться к новым нейросетям... 🧠\n\n*Проверяю 4 современные модели*');
   } 
   else if (text === '📞 Контакты') {
     bot.sendMessage(chatId, '👨‍💻 Создатель: @ch0nyatski\n\nПомощь с интеграцией ИИ');
@@ -127,15 +141,15 @@ bot.on('message', async (msg) => {
   else if (text === '🔧 Статус ИИ') {
     bot.sendMessage(chatId, 
       '🔧 *Статус ИИ систем:*\n\n' +
-      '• 🤖 Пробую разные модели\n' +
-      '• 🔄 Автоматический перебор\n' + 
-      '• ⚡ Таймаут 20 сек на модель\n' +
-      '• 📊 В логах видно что работает\n\n' +
-      'Напиши вопрос - протестируем!'
+      '• 🤖 4 современные модели\n' +
+      '• 🔄 Автоповтор при загрузке\n' + 
+      '• ⏳ Ожидание 30 сек если модель спит\n' +
+      '• 📊 Лучшие шансы на работу\n\n' +
+      'Первые запросы могут занимать до 30 секунд!'
     );
   }
   else {
-    const thinkingMsg = await bot.sendMessage(chatId, '🧠 Проверяю доступные нейросети...\n*Это займет до 60 секунд*');
+    const thinkingMsg = await bot.sendMessage(chatId, '🧠 Проверяю современные нейросети...\n*Первые запросы могут занимать до 30 секунд*');
     
     try {
       const aiResponse = await askAI(text);
@@ -143,9 +157,9 @@ bot.on('message', async (msg) => {
       bot.sendMessage(chatId, `🤖 *Результат:*\n\n${aiResponse}`);
     } catch (error) {
       bot.deleteMessage(chatId, thinkingMsg.message_id);
-      bot.sendMessage(chatId, '💥 Критическая ошибка при подключении ко всем моделям.');
+      bot.sendMessage(chatId, '💥 Все модели недоступны. Попробуй через 5 минут.');
     }
   }
 });
 
-console.log('Бот с мульти-модельным подходом запущен!');
+console.log('Бот с улучшенными моделями запущен!');
